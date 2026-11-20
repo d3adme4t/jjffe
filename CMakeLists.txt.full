@@ -1,0 +1,1070 @@
+cmake_minimum_required(VERSION 3.16)
+project(jjffe VERSION 2.8 LANGUAGES CXX C)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 11)
+
+# Compiler warnings — catch real bugs early
+add_compile_options(-Wall -Wextra -Wno-unused-parameter)
+
+option(JJFFE_USE_SDL "Build with SDL backend" ON)
+option(JJFFE_USE_OGRE "Build Ogre/Vulkan binary (ffelnxogre)" ON)
+option(JJFFE_USE_D3D9 "Build D3D9/DXVK binary (ffelnxd3d)" ON)
+
+# --- Build acceleration: ccache ---
+find_program(CCACHE_PROGRAM ccache)
+if(CCACHE_PROGRAM)
+    message(STATUS "ccache found: ${CCACHE_PROGRAM}")
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+else()
+    message(WARNING "ccache not found -- build will not be cached. Install ccache for faster rebuilds.")
+endif()
+
+include_directories(${CMAKE_SOURCE_DIR}/include)
+
+add_subdirectory(src/core)
+add_subdirectory(src/platform)
+add_subdirectory(src/game)
+add_subdirectory(src/data)
+
+add_executable(ffelnxsdl src/main.cpp)
+target_link_libraries(ffelnxsdl
+    "LINKER:--start-group"
+    jjffe_game
+    jjffe_platform
+    jjffe_core
+    jjffe_data
+    "LINKER:--end-group"
+)
+
+if(JJFFE_USE_SDL)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SDL REQUIRED sdl)
+    
+    # Phase 56: SDL_mixer for music playback
+    pkg_check_modules(SDL_MIXER QUIET SDL_mixer)
+    
+    # Add SDL backend sources to main executable
+    target_sources(ffelnxsdl PRIVATE 
+        src/platform/sdl_backend.cpp
+        src/platform/sdl_input.cpp
+        src/platform/sdl_sound.cpp
+        src/platform/ffe_sound_mix.cpp
+        src/platform/song_table.cpp
+        src/platform/sdl_timer.cpp
+        hmp.cpp
+    )
+    target_compile_definitions(ffelnxsdl PRIVATE JJFFE_USE_SDL)
+    target_link_libraries(ffelnxsdl ${SDL_LIBRARIES} GL)
+    target_include_directories(ffelnxsdl PRIVATE ${SDL_INCLUDE_DIRS})
+    if(SDL_MIXER_FOUND)
+        target_link_libraries(ffelnxsdl ${SDL_MIXER_LIBRARIES})
+        target_include_directories(ffelnxsdl PRIVATE ${SDL_MIXER_INCLUDE_DIRS})
+        target_compile_definitions(ffelnxsdl PRIVATE JJFFE_USE_SDL_MIXER)
+    endif()
+    target_compile_definitions(ffelnxsdl PRIVATE __FFELNXSDL__)
+endif()
+
+# --- Optional FFED3D D3D9 / DXVK Native binary (ships .x + planets) ---
+if(JJFFE_USE_D3D9)
+    add_subdirectory(src/d3d)
+    add_executable(ffelnxd3d src/main.cpp)
+    target_link_libraries(ffelnxd3d
+        "LINKER:--start-group"
+        jjffe_d3d
+        jjffe_game
+        jjffe_platform
+        jjffe_core
+        jjffe_data
+        "LINKER:--end-group"
+    )
+    target_compile_definitions(ffelnxd3d PRIVATE JJFFE_USE_D3D9 __FFELNXD3D__)
+    set_target_properties(ffelnxd3d PROPERTIES
+        BUILD_RPATH "/usr/local/lib64;/usr/local/lib"
+        INSTALL_RPATH "/usr/local/lib64;/usr/local/lib"
+    )
+endif()
+
+# --- Optional Ogre-Next 4 / Vulkan binary (menus + ship demo) ---
+if(JJFFE_USE_OGRE)
+    add_subdirectory(src/ogre)
+    add_executable(ffelnxogre src/main.cpp)
+    target_link_libraries(ffelnxogre
+        "LINKER:--start-group"
+        jjffe_ogre
+        jjffe_game
+        jjffe_platform
+        jjffe_core
+        jjffe_data
+        "LINKER:--end-group"
+    )
+    target_compile_definitions(ffelnxogre PRIVATE JJFFE_USE_OGRE __FFELNXOGRE__)
+    # RPATH matches JJFFE_OGRE_NEXT_ROOT (default /opt/ogre-next)
+    if(NOT JJFFE_OGRE_NEXT_ROOT)
+        set(JJFFE_OGRE_NEXT_ROOT "/opt/ogre-next")
+    endif()
+    set_target_properties(ffelnxogre PROPERTIES
+        BUILD_RPATH "${JJFFE_OGRE_NEXT_ROOT}/lib"
+        INSTALL_RPATH "${JJFFE_OGRE_NEXT_ROOT}/lib"
+    )
+    add_custom_command(TARGET ffelnxogre POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/data/ogre-next
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/data/ogre-next
+            ${CMAKE_BINARY_DIR}/data/ogre-next
+        COMMENT "Copy data/ogre-next (plugins + Hlms Media) into build tree"
+    )
+endif()
+
+enable_testing()
+add_executable(test_cdr_file test/test_cdr_file.cpp)
+target_link_libraries(test_cdr_file "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME CdrFileTests COMMAND test_cdr_file)
+add_executable(test_band_lane_interp test/test_band_lane_interp.cpp)
+target_link_libraries(test_band_lane_interp "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME BandLaneInterp COMMAND test_band_lane_interp)
+add_executable(test_band_lane_tables test/test_band_lane_tables.cpp)
+target_link_libraries(test_band_lane_tables "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME BandLaneTables COMMAND test_band_lane_tables)
+# Task 4.188: render-parity phase 1 - re-capture the F2/F3 screens and diff against the committed
+# baselines. Regression protection only; see docs/RENDER_PARITY_PLAN.md.
+add_test(NAME RenderPin COMMAND ${CMAKE_SOURCE_DIR}/tools/render_pin_ctest.sh)
+
+# Task 2.1 (MASTER_PLAN): render-parity CI gate — console band of the live port
+# screens against the pinned ASM reference frames (ratchet budget in
+# test/data/parity/accepted.json). Band parity only; see docs/RENDER_PARITY_PLAN.md.
+add_test(NAME RenderParity COMMAND ${CMAKE_SOURCE_DIR}/tools/render_parity_ctest.sh)
+
+# R325 infra: kit liveness smoke (fast, ~2 captures) + opt-in fleet
+# regression (heavy, promoted-hull grade check, FLEET_REGRESSION=1).
+add_test(NAME KitLiveness COMMAND ${CMAKE_SOURCE_DIR}/tools/kit_liveness_ctest.sh)
+set_tests_properties(KitLiveness PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300 RESOURCE_LOCK ab_capture)
+if(DEFINED ENV{FLEET_REGRESSION})
+  add_test(NAME FleetRegression COMMAND ${CMAKE_SOURCE_DIR}/tools/fleet_regression.sh)
+  set_tests_properties(FleetRegression PROPERTIES TIMEOUT 1800)
+endif()
+
+add_executable(test_core test/test_core.cpp)
+target_link_libraries(test_core "LINKER:--start-group" jjffe_core jjffe_game jjffe_platform jjffe_data "LINKER:--end-group")
+add_test(NAME CoreTests COMMAND test_core)
+
+add_executable(test_video test/test_video.cpp)
+# jjffe_core: video.cpp / dpal_build.cpp call the core-side DPal accessors
+# (ComputeRenderFillRgb16, SetRenderFillColor, GetRenderFillColor, GetGameClock).
+target_link_libraries(test_video "LINKER:--start-group" jjffe_platform jjffe_data jjffe_core jjffe_game "LINKER:--end-group")
+add_test(NAME VideoTests COMMAND test_video)
+
+# The song table lives in the platform layer but is pure data: it must compile
+# (and be checked) in builds without SDL_mixer, where the play path is stubbed.
+add_executable(test_sound_songs test/test_sound_songs.cpp src/platform/song_table.cpp)
+target_include_directories(test_sound_songs PRIVATE include)
+add_test(NAME SoundSongTable COMMAND test_sound_songs)
+
+# R1241: ASM FillSound transplant vs port — byte-identical mixer unit parity
+add_executable(test_ffe_sound_mix
+  test/test_ffe_sound_mix.cpp
+  src/platform/ffe_sound_mix.cpp
+)
+target_include_directories(test_ffe_sound_mix PRIVATE include)
+add_test(NAME FfeSoundMixParity COMMAND test_ffe_sound_mix)
+set_tests_properties(FfeSoundMixParity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_platform test/test_platform.cpp)
+target_link_libraries(test_platform "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME PlatformTests COMMAND test_platform)
+
+add_executable(test_draw test/test_draw.cpp)
+target_link_libraries(test_draw "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME DrawTests COMMAND test_draw)
+
+add_executable(test_string test/test_string.cpp)
+target_link_libraries(test_string "LINKER:--start-group" jjffe_core jjffe_game jjffe_platform jjffe_data "LINKER:--end-group")
+add_test(NAME StringTests COMMAND test_string)
+
+add_executable(test_ui test/test_ui.cpp)
+target_link_libraries(test_ui "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME UITests COMMAND test_ui)
+
+add_executable(test_game_state test/test_game_state.cpp)
+target_link_libraries(test_game_state "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME GameStateTests COMMAND test_game_state)
+
+add_executable(test_game_clock test/test_game_clock.cpp)
+target_link_libraries(test_game_clock "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME GameClock COMMAND test_game_clock)
+
+# Task 4.31: module registry — FUNC_000143 vs the ffeasm spawn golden, aliases, dispatch.
+add_executable(test_module_registry test/test_module_registry.cpp)
+target_link_libraries(test_module_registry "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ModuleRegistry COMMAND test_module_registry WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.33: GUI function pointers DATA_007675..007682 wired and calling through.
+# Task 4.47: DATA_007674 (FUNC_001432_GuiProcessInput) driven by scripted input.
+add_executable(test_gui_pointers test/test_gui_pointers.cpp)
+target_link_libraries(test_gui_pointers "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME GuiPointers COMMAND test_gui_pointers WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.34: console-log flag DATA_008810 (FUNC_001576 / ClearBuf -> FUNC_000272 gate).
+add_executable(test_console_log_flag test/test_console_log_flag.cpp)
+target_link_libraries(test_console_log_flag "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ConsoleLogFlag COMMAND test_console_log_flag WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_data test/test_data.cpp)
+target_link_libraries(test_data jjffe_data)
+add_test(NAME DataTests COMMAND test_data)
+
+add_executable(test_math test/test_math.cpp)
+target_link_libraries(test_math jjffe_core jjffe_data)
+add_test(NAME MathTests COMMAND test_math)
+
+# A/B: C++ projection/zoom vs ASM FUNC_001479 / 001521 / 001666 / scaleRelated
+add_executable(test_ab_projection test/test_ab_projection.cpp)
+target_link_libraries(test_ab_projection "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AbProjectionZoom COMMAND test_ab_projection)
+set_tests_properties(AbProjectionZoom PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_new_functions test/test_new_functions.cpp)
+target_link_libraries(test_new_functions "LINKER:--start-group" jjffe_core jjffe_platform jjffe_game jjffe_data "LINKER:--end-group")
+add_test(NAME NewFunctionTests COMMAND test_new_functions)
+
+add_executable(test_data_loader test/test_data_loader.cpp)
+target_link_libraries(test_data_loader jjffe_data)
+add_test(NAME DataLoaderTests COMMAND test_data_loader)
+
+add_executable(test_bitmap_parser test/test_bitmap_parser.cpp)
+target_link_libraries(test_bitmap_parser jjffe_data)
+add_test(NAME BitmapParserTests COMMAND test_bitmap_parser)
+
+add_executable(test_bitmap_table test/test_bitmap_table.cpp)
+target_link_libraries(test_bitmap_table "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME BitmapTableTests COMMAND test_bitmap_table)
+
+add_executable(test_mission_data test/test_mission_data.cpp)
+target_link_libraries(test_mission_data jjffe_data)
+add_test(NAME MissionDataTests COMMAND test_mission_data)
+
+add_executable(test_bytecode test/test_bytecode.cpp)
+target_link_libraries(test_bytecode "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME BytecodeTests COMMAND test_bytecode)
+
+add_executable(test_integration test/test_integration.cpp)
+target_link_libraries(test_integration "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME IntegrationTests COMMAND test_integration)
+
+# 3D Pipeline tests
+# Task 4.119: the glyph rows FUNC_001598_DrawChar draws must come from the blob's
+# font (blob+OFFSET_DATA_007750), not from the address of the port's own DATA_007750 static. No
+# replay scenario reaches that function, so without this test the fix is unprotected.
+add_executable(test_drawchar_font test/test_drawchar_font.cpp)
+target_link_libraries(test_drawchar_font "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME DrawCharFontRows COMMAND test_drawchar_font)
+set_tests_properties(DrawCharFontRows PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.120: labels the ASM uses by address as a table / string base read the
+# label's image (blob copy or ASM-sized storage); three of the four paths are
+# unreached by every replay scenario.
+add_executable(test_address_base test/test_address_base.cpp)
+target_include_directories(test_address_base PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_address_base "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AddressBaseLabels COMMAND test_address_base)
+set_tests_properties(AddressBaseLabels PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.121: the 4.120 reported rows that are fixed and unreached (the text
+# file mode, hotkey table, sector names, FUNC_001572 records, star label, shade
+# ramp, restart clear, number buffer, core DPalSet / tex-step forwarders).
+add_executable(test_address_base_burndown test/test_address_base_burndown.cpp)
+target_include_directories(test_address_base_burndown PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_address_base_burndown "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AddressBaseBurnDown COMMAND test_address_base_burndown)
+set_tests_properties(AddressBaseBurnDown PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.122: the no-op stubs whose ASM does work and no replay scenario reaches
+# (system-menu hotkeys / pages / new game, mission menu, op 0x2e, FF80 null slots,
+# FUNC_000674's list builders), and the DATA_008804 sub-label rows.
+add_executable(test_stub_sweep test/test_stub_sweep.cpp)
+target_include_directories(test_stub_sweep PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_stub_sweep "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME StubSweep COMMAND test_stub_sweep)
+set_tests_properties(StubSweep PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_stub_burndown test/test_stub_burndown.cpp)
+target_include_directories(test_stub_burndown PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_stub_burndown "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME StubBurndown COMMAND test_stub_burndown)
+set_tests_properties(StubBurndown PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# 4.126: the functions 4.124's blocked rows waited on (AVI header chunks, ...).
+add_executable(test_blocked_conversions test/test_blocked_conversions.cpp)
+target_include_directories(test_blocked_conversions PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_blocked_conversions "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME BlockedConversions COMMAND test_blocked_conversions)
+set_tests_properties(BlockedConversions PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# 4.127: the DATA_008804 save span, FUNC_000170 / 171 and the system-menu file paths.
+add_executable(test_save_restore test/test_save_restore.cpp)
+target_include_directories(test_save_restore PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_save_restore "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME SaveRestore COMMAND test_save_restore)
+set_tests_properties(SaveRestore PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_3d_pipeline test/test_3d_pipeline.cpp)
+target_link_libraries(test_3d_pipeline "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME Pipeline3DTests COMMAND test_3d_pipeline)
+set_tests_properties(Pipeline3DTests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Palette dump test
+add_executable(test_palette_dump test/test_palette_dump.cpp)
+target_link_libraries(test_palette_dump jjffe_data)
+
+# Palette visualization v3
+add_executable(test_palette_v3 test/test_palette_v3.cpp)
+target_link_libraries(test_palette_v3 jjffe_data)
+
+# Ship controls tests
+add_executable(test_ship_controls test/test_ship_controls.cpp)
+target_link_libraries(test_ship_controls "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+target_compile_definitions(test_ship_controls PRIVATE JJFFE_TEST)
+add_test(NAME ShipControlsTests COMMAND test_ship_controls)
+
+# AI Behavior tests
+add_executable(test_ai_behavior test/test_ai_behavior.cpp)
+target_link_libraries(test_ai_behavior "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AIBehaviorTests COMMAND test_ai_behavior)
+
+# Combat tests
+add_executable(test_combat test/test_combat.cpp)
+target_link_libraries(test_combat "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME CombatTests COMMAND test_combat)
+
+# SysGen / SysObj layout tests (Phase 64)
+add_executable(test_sysgen test/test_sysgen.cpp)
+target_link_libraries(test_sysgen "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME SysGenTests COMMAND test_sysgen)
+set_tests_properties(SysGenTests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.1 — player spawn landed-at-Hope (ffeasm oracle)
+add_executable(test_player_spawn test/test_player_spawn.cpp)
+target_link_libraries(test_player_spawn "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME PlayerSpawnTests COMMAND test_player_spawn)
+set_tests_properties(PlayerSpawnTests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.6 — mission landed pose (alt 0 / horizon; orbital hatch)
+add_executable(test_mission_landed test/test_mission_landed.cpp)
+target_link_libraries(test_mission_landed "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME MissionLandedTests COMMAND test_mission_landed)
+set_tests_properties(MissionLandedTests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.2 — full object-table / world parity (ffeasm oracle)
+add_executable(test_world_parity test/test_world_parity.cpp)
+target_link_libraries(test_world_parity "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME WorldParityTests COMMAND test_world_parity)
+set_tests_properties(WorldParityTests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.18 — cold-boot 115-slot spawn table (FUNC_000829…880 port) vs ffeasm oracle
+add_executable(test_world_spawn_table test/test_world_spawn_table.cpp)
+target_link_libraries(test_world_spawn_table "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME WorldSpawnTable COMMAND test_world_spawn_table)
+set_tests_properties(WorldSpawnTable PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# R2 — orbital time-base replay (docs/PHASE_64_WORLDGEN_CHARTER.md): drives the
+# port's WorldOrbitAdvanceBody to the ffeasm captured clock values and requires
+# the angle deltas to match (tools/capture_ffeasm_orbits.sh produced the capture).
+add_executable(test_world_orbit_replay test/test_world_orbit_replay.cpp)
+target_link_libraries(test_world_orbit_replay "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME WorldOrbitReplay COMMAND test_world_orbit_replay)
+set_tests_properties(WorldOrbitReplay PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.149 — FUNC_000704 (action 5, via the now-real FUNC_000149) on the live
+# game's own InitMission/UpdateMission path, no test-only hook.
+add_executable(test_traffic_live_ai test/test_traffic_live_ai.cpp)
+target_link_libraries(test_traffic_live_ai "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME TrafficLiveAiDispatch COMMAND test_traffic_live_ai)
+set_tests_properties(TrafficLiveAiDispatch PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# MISSING_CONTROLS_PLAN.md item 3 (view mode rendering), mode 1 (rear view):
+# a real F7 press on the live InitMission/UpdateMission/HandleMissionInput
+# path turns the camera 180 degrees, matching FUNC_001054's case 1.
+add_executable(test_view_mode_camera test/test_view_mode_camera.cpp)
+target_link_libraries(test_view_mode_camera "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ViewModeCamera COMMAND test_view_mode_camera)
+# R1174 InputPressWindow: a PHYSICAL key press (the edge is discovered inside the poll, as sdl_input.cpp
+# does), asserting ffeasm's model - the effect lands one frame after the poll, early or late in the frame.
+# This is the gate that can see R1173's defect; every injected-key gate is blind to it.
+add_executable(test_input_press_window test/test_input_press_window.cpp)
+target_link_libraries(test_input_press_window "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME InputPressWindow COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tools/input_press_ctest.sh)
+set_tests_properties(InputPressWindow PROPERTIES ENVIRONMENT "BIN=$<TARGET_FILE:test_input_press_window>")
+set_tests_properties(ViewModeCamera PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.150, slice 1: the player's damage applier FUNC_000953 on a real traffic ship (ffe.asm
+# 71367-71470), on the live game's own path, no test-only hook.
+add_executable(test_combat_damage_live test/test_combat_damage_live.cpp)
+target_link_libraries(test_combat_damage_live "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME CombatDamageLive COMMAND test_combat_damage_live)
+set_tests_properties(CombatDamageLive PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.151, slice 2: the live player's fire runs the ASM's own frame
+# (PlayerFireReal -> FUNC_001040 -> FUNC_000931, ffe.asm:77011 -> 69727), on the live path with
+# no test-only hook. Asserts the bolt spawn's own observable (+0x151 bit 1), and names the
+# FUNC_000931 precondition when the chain stops short.
+add_executable(test_player_fire_live test/test_player_fire_live.cpp)
+target_link_libraries(test_player_fire_live "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME PlayerFireLive COMMAND test_player_fire_live)
+set_tests_properties(PlayerFireLive PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.152, slice 3: close the live circle - a live-fired shot damages a real traffic ship
+# through the ASM's own hitscan chain (FUNC_000802 -> DATA_008714 -> FUNC_000953).
+add_executable(test_live_hit_circle test/test_live_hit_circle.cpp)
+target_link_libraries(test_live_hit_circle "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME LiveHitCircle COMMAND test_live_hit_circle)
+set_tests_properties(LiveHitCircle PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.154, slice 5: the closed circle - a live-fired shot damages a real traffic ship through
+# the ASM's own chain (FUNC_000817 relation gates -> FUNC_000819/000826 -> FUNC_000953).
+add_executable(test_live_shot_lands test/test_live_shot_lands.cpp)
+target_link_libraries(test_live_shot_lands "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME LiveShotLands COMMAND test_live_shot_lands)
+set_tests_properties(LiveShotLands PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.156, slice 6: the held trigger - latch (FUNC_000149's re-fire loop, ffe.asm:15221-15238),
+# the +0xe8 rearm cooldown that consumes the retry, and sustained fire on the live path.
+add_executable(test_live_fire_latch test/test_live_fire_latch.cpp)
+target_link_libraries(test_live_fire_latch "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME LiveFireLatch COMMAND test_live_fire_latch)
+set_tests_properties(LiveFireLatch PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Body-paint S2 sphere invariants + S4 picker
+add_executable(test_body_sphere test/test_body_sphere.cpp)
+target_link_libraries(test_body_sphere "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME BodySphereTests COMMAND test_body_sphere)
+set_tests_properties(BodySphereTests PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_planet_0x1f test/test_planet_0x1f.cpp)
+target_link_libraries(test_planet_0x1f "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME Planet0x1F COMMAND test_planet_0x1f)
+set_tests_properties(Planet0x1F PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Ship model validation tests (Phase 0/1: blob data validation + model loading)
+add_executable(test_ship_model test/test_ship_model.cpp)
+target_link_libraries(test_ship_model "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ShipModelTests COMMAND test_ship_model)
+
+# Mesh bytecode parser tests (Phase 2)
+add_executable(test_mesh_parser test/test_mesh_parser.cpp)
+target_link_libraries(test_mesh_parser "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME MeshParserTests COMMAND test_mesh_parser)
+
+# R1236: HandleOp12 / HandleOp17Gate synthetic bytecode pins
+add_executable(test_op12_op17_handlers test/test_op12_op17_handlers.cpp)
+target_link_libraries(test_op12_op17_handlers "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME Op12Op17Handlers COMMAND test_op12_op17_handlers)
+
+# OP1E-A structural: NormAxes Q31 sentinel + angle=0 local basis (dump-free)
+add_executable(test_op1e_local_basis test/test_op1e_local_basis.cpp)
+target_link_libraries(test_op1e_local_basis "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME Op1eLocalBasis COMMAND test_op1e_local_basis)
+set_tests_properties(Op1eLocalBasis PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# OP1E-A dig #4: algebraic twist sign/axis lock (dump-free, before live ALU)
+add_executable(test_op1e_twist_algebra test/test_op1e_twist_algebra.cpp)
+target_link_libraries(test_op1e_twist_algebra "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME Op1eTwistAlgebra COMMAND test_op1e_twist_algebra)
+set_tests_properties(Op1eTwistAlgebra PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# R779: viewport acceptance (R778's AABB rule) regression test
+add_executable(test_vis_aabb test/test_vis_aabb.cpp)
+target_link_libraries(test_vis_aabb "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME VisAabb COMMAND test_vis_aabb)
+set_tests_properties(VisAabb PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# R770: the "child drawn WHOLE" laws (hulls 49/44/19) plus a negative control
+add_executable(test_child_keep_law test/test_child_keep_law.cpp)
+target_link_libraries(test_child_keep_law "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ChildKeepLaw COMMAND test_child_keep_law)
+set_tests_properties(ChildKeepLaw PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# OP1E-A dig #3: live ALU + NormAxes reset compose (parent-invariant)
+add_executable(test_op1e_sentinel_compose test/test_op1e_sentinel_compose.cpp)
+target_link_libraries(test_op1e_sentinel_compose "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME Op1eSentinelCompose COMMAND test_op1e_sentinel_compose)
+set_tests_properties(Op1eSentinelCompose PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Saker thruster stage vs bytecode. The old comment here said "fails until
+# EmitThruster restored — WILL_FAIL", but no WILL_FAIL property was ever set and the
+# test PASSES (rc=0, verified R745): EmitThruster has since been restored and the
+# comment was stale. Keep it as a normal test so a regression fails loudly.
+add_executable(test_ab_mesh_stages test/test_ab_mesh_stages.cpp)
+target_link_libraries(test_ab_mesh_stages "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME SakerThrusterStage COMMAND test_ab_mesh_stages)
+set_tests_properties(SakerThrusterStage PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Adder A/B mesh-length / thruster-harvest bisect
+add_executable(test_adder_ab_bisect test/test_adder_ab_bisect.cpp)
+target_link_libraries(test_adder_ab_bisect "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AdderAbBisect COMMAND test_adder_ab_bisect)
+set_tests_properties(AdderAbBisect PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Mesh parse / LOD gate for A/B ship ladder (Kestrel sprites, Krait negative gates)
+add_executable(test_ab_mesh_parse test/test_ab_mesh_parse.cpp)
+target_link_libraries(test_ab_mesh_parse "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AbMeshParse COMMAND test_ab_mesh_parse)
+set_tests_properties(AbMeshParse PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Material shade / DPal remap fixtures (Adder green, black panels)
+add_executable(test_ab_shade test/test_ab_shade.cpp)
+target_link_libraries(test_ab_shade "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AbShadeRemap COMMAND test_ab_shade)
+set_tests_properties(AbShadeRemap PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Phase R: flat triangle/quad fill vs ASM FUNC_001603/604/608 formula clone
+# Soft-diff by default; JJFFE_AB_STRICT=1 requires xor==0 (R-unit gate)
+add_executable(test_ab_raster_flat test/test_ab_raster_flat.cpp)
+target_link_libraries(test_ab_raster_flat "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AbRasterFlat COMMAND test_ab_raster_flat)
+set_tests_properties(AbRasterFlat PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Phase ContourHull: emitSpan row-tile / Viper Contour-skip invariants
+add_executable(test_contour_invariants test/test_contour_invariants.cpp)
+target_link_libraries(test_contour_invariants "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ContourInvariants COMMAND test_contour_invariants)
+set_tests_properties(ContourInvariants PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Zero-dep emitSpan proof (buggy y+1.5 vs fixed y+0.5 + kScale coverage sweep)
+add_executable(contour_span_test tools/contour_span_test.cpp)
+add_test(NAME ContourSpanEmit COMMAND contour_span_test)
+set_tests_properties(ContourSpanEmit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Densify (AA blocks) vs true-edge sawtooth tradeoff (production topology)
+add_executable(contour_sawtooth_validate tools/contour_sawtooth_validate.cpp)
+add_test(NAME ContourSawtoothValidate COMMAND contour_sawtooth_validate)
+set_tests_properties(ContourSawtoothValidate PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Mixed bezier+bridge → closed ring (Puma ExtractRings edge-walk)
+add_executable(contour_edge_walk_validate tools/contour_edge_walk_validate.cpp)
+add_test(NAME ContourEdgeWalkValidate COMMAND contour_edge_walk_validate)
+set_tests_properties(ContourEdgeWalkValidate PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Phase M: DPal mapping vs ASM oracle (dpal_asm.bin)
+add_executable(test_ab_dpal test/test_ab_dpal.cpp)
+target_link_libraries(test_ab_dpal "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME AbDPal COMMAND test_ab_dpal)
+set_tests_properties(AbDPal PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(dpal_dump_tables tools/dpal_dump_tables.cpp)
+target_link_libraries(dpal_dump_tables "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+set_tests_properties(AbRasterFlat PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Strict Saker+Adder A/B (skips without ASM dumps; JJFFE_AB_STRICT=1 to fail hard)
+# R1141: the dumps are not committed, so a missing reference exits 77 and ctest lists the test as
+# "Not Run (Skipped)" instead of counting a green pass over nothing (SKIP_RETURN_CODE below).
+add_test(NAME AbStrictSakerAdder COMMAND bash ${CMAKE_SOURCE_DIR}/tools/ab_strict_ctest.sh)
+set_tests_properties(AbStrictSakerAdder PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+
+# Optional C++ vs ASM pixel/stage diff (skips if ab_shots/asm missing)
+add_test(NAME AbDiffSaker COMMAND bash ${CMAKE_SOURCE_DIR}/tools/ab_diff_ctest.sh)
+set_tests_properties(AbDiffSaker PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+
+# Phase 62-01 / 62-01b: committed ASM golden vs live C++ capture (never self-golden)
+# Legacy alias keeps GoldenRecordShipDemo → Adder front
+add_test(NAME GoldenRecordShipDemo COMMAND bash ${CMAKE_SOURCE_DIR}/tools/golden_record_ctest.sh ship_demo_adder29_front)
+set_tests_properties(GoldenRecordShipDemo PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.3f: real-path mission flight frame vs ASM post-intro oracle (regression guard)
+add_test(NAME FlightFrameAB COMMAND bash ${CMAKE_SOURCE_DIR}/tools/flight_frame_ctest.sh)
+set_tests_properties(FlightFrameAB PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# R1245: scripted Hope liftoff must move cockpit viewport rows 0–129 (stale GameObj camera).
+add_test(NAME FlightViewMotion COMMAND bash ${CMAKE_SOURCE_DIR}/tools/flight_view_motion_ctest.sh)
+set_tests_properties(FlightViewMotion PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  TIMEOUT 300)
+
+# R1137: live view modes F1 rear / F8 cockpit / F9 external vs ffeasm at frame 120, exact RGB
+# (references: tools/capture_view_ab_refs.sh -> test/data/view_ab/)
+add_test(NAME ViewModeAB COMMAND bash ${CMAKE_SOURCE_DIR}/tools/view_ab_ctest.sh)
+set_tests_properties(ViewModeAB PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1160: the missile view (mode 5) reached in the live port by real play - Missile Viewer fitted,
+# planet clicked as combat target, m, F10 (test/data/parity/missile_view/scenario.json), with teeth
+add_test(NAME MissileViewReach COMMAND bash ${CMAKE_SOURCE_DIR}/tools/missile_view_ctest.sh)
+set_tests_properties(MissileViewReach PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1177: catches the live FUNC_001056 ordering divergence that MissileViewReach misses (its m is
+# consumed at e=182, well before ffeasm's per-second gate at e=190). This scenario presses m at frame
+# 188 so consumption lands exactly on the gate frame.
+add_test(NAME MissileViewGate COMMAND bash ${CMAKE_SOURCE_DIR}/tools/missile_view_gate_ctest.sh)
+set_tests_properties(MissileViewGate PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1178: held-joystick fire must reach FUNC_001040 every frame; catches a DATA_009158!=0 guard on
+# FUNC_001056 starving the fire path (measured 0 vs 21 dispatches over a 21-frame hold).
+add_test(NAME JoystickFire COMMAND bash ${CMAKE_SOURCE_DIR}/tools/joystick_fire_ctest.sh)
+set_tests_properties(JoystickFire PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1180: a surface launch must complete its climb (state 0x24 -> 0x26). Compares the live port's per-frame
+# DATA_008870 sequence against ffeasm on the targeting scenario; catches a HUD write clobbering DATA_008867.
+add_test(NAME StateSequence COMMAND bash ${CMAKE_SOURCE_DIR}/tools/state_sequence_ctest.sh)
+set_tests_properties(StateSequence PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1229: save-file A/B — FUNC_000065 bytes at logic-replay checkpoints vs ffeasm. Harness + measurement;
+# divergences must be classified (budget 0 only after measured identical). 181 → 182 tests.
+add_executable(test_save_ab_crossload test/test_save_ab_crossload.cpp)
+target_include_directories(test_save_ab_crossload PRIVATE ${CMAKE_SOURCE_DIR}/data_blob)
+target_link_libraries(test_save_ab_crossload "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME SaveABParity COMMAND bash ${CMAKE_SOURCE_DIR}/tools/save_ab_ctest.sh)
+set_tests_properties(SaveABParity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 3600
+  SKIP_RETURN_CODE 77)
+# R1183: frame-aligned pixel compare of the live port vs ffeasm on targeting (port N == ffeasm N+1 in flight).
+add_test(NAME TargetingPixels COMMAND bash ${CMAKE_SOURCE_DIR}/tools/targeting_pixel_gate.sh)
+set_tests_properties(TargetingPixels PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1188: the LIVE port's F2/F3/flying-F3 screens vs ffeasm's own frames (real parity evidence; RenderPin's
+# synthetic baselines cannot blit the panel background, so they stay regression protection only).
+add_test(NAME PanelPixels COMMAND bash ${CMAKE_SOURCE_DIR}/tools/panel_pixels_ctest.sh)
+set_tests_properties(PanelPixels PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# R1233: LIVE SysMenu SAVE/LOAD dialog frames vs ffeasm (port N ↔ asm N+1). New refs under
+# test/data/parity/dialogs/ — does not touch panels/**. SAVE via OK hotspot; disposable commandr/.
+# R1238: RESOURCE_LOCK commandr — parallel ctest raced the repo-root symlink (ASan -j4 flake).
+# BIN points at this build tree's ffelnxsdl (else the script defaults to $ROOT/build/).
+add_test(NAME DialogPixels COMMAND bash ${CMAKE_SOURCE_DIR}/tools/dialog_pixels_ctest.sh)
+set_tests_properties(DialogPixels PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} TIMEOUT 900
+  RESOURCE_LOCK commandr
+  ENVIRONMENT "BIN=$<TARGET_FILE:ffelnxsdl>")
+# R1194: does test_view_mode_camera's synthetic panel capture reproduce the REAL panel? Today it does not
+# (~50,000 px from ffeasm, while live play is exact), which is why RenderPin is regression-only. This gate
+# measures that gap against ffeasm so the harness can be fixed and held to parity.
+add_test(NAME HarnessPanelParity COMMAND bash ${CMAKE_SOURCE_DIR}/tools/harness_panel_ctest.sh)
+set_tests_properties(HarnessPanelParity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# R1164: the HUD range FUNC_001109 computes per object and the zoom target it lowers, vs ffeasm's
+# own trace. Closes the "port 13 vs ASM 40" note R1147/R1154 left open (they agree; it was stale).
+add_test(NAME HudRangeReach COMMAND bash ${CMAKE_SOURCE_DIR}/tools/hud_range_ctest.sh)
+set_tests_properties(HudRangeReach PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# R1145: the port's FUNC_001677 composition vs the ASM's recorded +0x26 (Sarajevo on Gupta's Rock,
+# a +0x57 child of a spinning moon). UnitsAudit checks the same rule self-consistently; this one
+# compares against ffeasm. References: tools/capture_parent_rotation_refs.sh -> test/data/parent_rotation/
+add_test(NAME ParentRotationAB COMMAND bash ${CMAKE_SOURCE_DIR}/tools/parent_rotation_ctest.sh)
+set_tests_properties(ParentRotationAB PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.8b: aloft terrain over-seam (index-0 2-px diagonals) at the worst pose
+add_test(NAME TerrainSeamAloft COMMAND bash ${CMAKE_SOURCE_DIR}/tools/terrain_seam_ctest.sh)
+set_tests_properties(TerrainSeamAloft PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.9: surface 0x1F paint (index-0 dropout) at alt 0 and the landed pose
+add_test(NAME SurfacePaintSweep COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh sweep)
+set_tests_properties(SurfacePaintSweep PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME LandedSurfacePaint COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh landed)
+set_tests_properties(LandedSurfacePaint PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Stronger than LandedSurfacePaint: with JJFFE_NO_SKY_CLEAR=1 the sky fill
+# cannot mask a dropout, so the ground band proves terrain is really painted.
+add_test(NAME LandedSurfaceCoverage COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh coverage)
+set_tests_properties(LandedSurfaceCoverage PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.10: one 3D frame order for every altitude — alt 64 vs 65 colours agree
+add_test(NAME SurfaceAloftColourMatch COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh colour)
+set_tests_properties(SurfaceAloftColourMatch PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.20: the landed frame on the Old Blackelk pad vs the ASM frame at the
+# same pose (captures/ffe_flow_spawn): pad rel exact, city colours through
+# FUNC_001680 within tv / nearest ceilings and closer than the ship-flat path.
+add_test(NAME PadCityColour COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh city)
+set_tests_properties(PadCityColour PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.11: open-terrain colours vs the ffeasm q_far oracle (star light on)
+add_test(NAME TerrainColourOracle COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh terrain)
+set_tests_properties(TerrainColourOracle PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.12: altitude haze — q_far/q_t50/q_t100 saturation profile + depth-key routing vs ffeasm
+add_test(NAME TerrainHazeDepth COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh haze)
+set_tests_properties(TerrainHazeDepth PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.14: over water the port draws the ffeasm's own FUNC_001838 olive (q_user_rot90 oracle)
+add_test(NAME WaterHazeOracle COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh water)
+set_tests_properties(WaterHazeOracle PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.15: water / coast / land face shares vs the ffeasm .route840 census;
+# the land/sea-inverted poses are known-open (WATER_CENSUS_STRICT=1 gates them too)
+add_test(NAME WaterFaceCensus COMMAND bash ${CMAKE_SOURCE_DIR}/tools/capture_port_landed.sh census)
+set_tests_properties(WaterFaceCensus PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.17: default boot = ASM flow (splash → intro → landed at Hope, no title/menu)
+add_test(NAME BootFlow COMMAND bash ${CMAKE_SOURCE_DIR}/tools/boot_flow_ctest.sh)
+set_tests_properties(BootFlow PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# R1239: SDL_mixer path + HMP→MIDI convert (never Mix_LoadMUS(.hmp) — aborts on 1.2.13).
+# Only register when the binary was built with mixer — mixer-less builds stay supported.
+if(SDL_MIXER_FOUND)
+  add_test(NAME MusicHmpSmoke COMMAND bash ${CMAKE_SOURCE_DIR}/tools/music_hmp_ctest.sh)
+  # R1240 M1: honor the build-tree binary (ASan suite must not fall back to build/ffelnxsdl).
+  set_tests_properties(MusicHmpSmoke PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    SKIP_RETURN_CODE 77
+    ENVIRONMENT "BIN=$<TARGET_FILE:ffelnxsdl>")
+endif()
+# R1239: committed PCM store hash gate (tools/extract_sound_raw.py --check)
+add_test(NAME SoundRawHashes COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/extract_sound_raw.py --check)
+set_tests_properties(SoundRawHashes PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# R1241/R1242: mixer unit parity + smoke-seam determinism (Leg3 → AudioSfxStreamParity)
+add_test(NAME AudioABParity COMMAND bash ${CMAKE_SOURCE_DIR}/tools/audio_ab_ctest.sh)
+set_tests_properties(AudioABParity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77   # fresh leg w/o FFE_DIR => SKIP
+  ENVIRONMENT "BIN=$<TARGET_FILE:ffelnxsdl>;UNIT=$<TARGET_FILE:test_ffe_sound_mix>;AUDIO_AB_FRESH=1")
+# R1242/R1243 Leg 1: fireab ASM↔port SFX_PLAY event parity (self-regenerating port)
+add_test(NAME AudioSfxEventParity COMMAND bash ${CMAKE_SOURCE_DIR}/tools/audio_sfx_event_parity_ctest.sh)
+set_tests_properties(AudioSfxEventParity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  ENVIRONMENT "LOGIC_REPLAY_BIN=$<TARGET_FILE:test_logic_replay>")
+# R1243 Leg 3: event-anchored live fireab stream parity (first_nz align). Wall ~20–40s;
+# included in primary + ASan (SKIP 77 if no FFE_DIR). Not a focused-ASan-only gate.
+add_test(NAME AudioSfxStreamParity COMMAND bash ${CMAKE_SOURCE_DIR}/tools/live_fireab_ctest.sh)
+set_tests_properties(AudioSfxStreamParity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77
+  TIMEOUT 300
+  ENVIRONMENT "BIN=$<TARGET_FILE:ffelnxsdl>")
+# R1246: AB_AUDIO_SFX=0 restores sine stub (no mixer banner; SDL Audio initialized).
+add_test(NAME AudioSfxHatchOff COMMAND bash ${CMAKE_SOURCE_DIR}/tools/audio_sfx_hatch_off_ctest.sh)
+set_tests_properties(AudioSfxHatchOff PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77
+  ENVIRONMENT "BIN=$<TARGET_FILE:ffelnxsdl>")
+# Task 4.13: a frame dump's .pose sidecar replays to the same frame (byte-identical)
+add_test(NAME PoseReplay COMMAND bash ${CMAKE_SOURCE_DIR}/tools/pose_replay_ctest.sh)
+set_tests_properties(PoseReplay PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.22: units audit — pins the render-space units the 64-bit camera-relative
+# refactor will move (docs/CAMERA_RELATIVE_PLAN.md): world invariants
+# (test_units_audit) + DATA_009269 / 0x400 clamp / face count / haze at the
+# oracle poses
+add_executable(test_units_audit test/test_units_audit.cpp)
+target_link_libraries(test_units_audit "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME UnitsAudit COMMAND bash ${CMAKE_SOURCE_DIR}/tools/units_audit_ctest.sh $<TARGET_FILE:test_units_audit>)
+set_tests_properties(UnitsAudit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.23: refactor step 1 (camera held as an FFE Vec64 about Hope) — the
+# landed / aloft / q_far frames stay byte-identical to the pre-refactor binary
+# (since task 4.24 on the JJFFE_PLANET_PARKED=1 A/B path; the default planets
+# go through FUNC_001680)
+add_test(NAME CameraFfeIdentity COMMAND bash ${CMAKE_SOURCE_DIR}/tools/camera_ffe_identity_ctest.sh)
+set_tests_properties(CameraFfeIdentity PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.125: intro cast colours (credits / Mercury limb) vs ffeasm, displayed 6-bit
+add_test(NAME IntroCastColour COMMAND bash ${CMAKE_SOURCE_DIR}/tools/intro_colour_ctest.sh)
+set_tests_properties(IntroCastColour PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  ENVIRONMENT "BIN=$<TARGET_FILE:ffelnxsdl>")
+# Task 4.39: FUNC_000270's needles read FUNC_000998's player (+0xd0 / +0x11e /
+# +0xea / +0xca equal the ffeasm walk's ffe_flow_spawn.player)
+add_test(NAME ConsoleGauge COMMAND bash ${CMAKE_SOURCE_DIR}/tools/console_gauge_ctest.sh)
+set_tests_properties(ConsoleGauge PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+
+# Task 4.40: FUNC_000261's ConButton table is FUNC_001003's (the ffeasm walk's
+# ffe_flow_spawn.buttons) and the console band equals ffe_flow_spawn but for
+# the XB-584 scanner blip and FUNC_001099's "Hope" shadow
+add_test(NAME ConsoleButtons COMMAND bash ${CMAKE_SOURCE_DIR}/tools/console_buttons_ctest.sh)
+set_tests_properties(ConsoleButtons PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+
+# 62-01b: one CTest per pd=0 tranche scenario
+set(_GOLDEN_SHIP_SCENARIOS
+  ship_demo_shuttle15_front
+  ship_demo_falcon20_front
+  ship_demo_adder29_front
+  ship_demo_saker31_front
+  ship_demo_viper34_front
+  ship_demo_cobra38_front
+  ship_demo_asp40_front
+  ship_demo_asp40_thrust
+  ship_demo_courier56_left
+  ship_demo_python57_front
+)
+foreach(_scen IN LISTS _GOLDEN_SHIP_SCENARIOS)
+  string(REPLACE "ship_demo_" "" _tok "${_scen}")
+  add_test(NAME GoldenRecordShipDemo_${_tok}
+           COMMAND bash ${CMAKE_SOURCE_DIR}/tools/golden_record_ctest.sh ${_scen})
+  list(APPEND _GOLDEN_SHIP_TESTS GoldenRecordShipDemo_${_tok})
+endforeach()
+set_tests_properties(${_GOLDEN_SHIP_TESTS} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Phase 62-03 / 62-04a: TST-04 fixed-point / matrix / PRNG vs ASM-transcribed goldens
+add_executable(test_golden_record_math test/test_golden_record_math.cpp)
+target_link_libraries(test_golden_record_math "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME GoldenRecordFixedMul COMMAND test_golden_record_math fixed_mul)
+add_test(NAME GoldenRecordSpecialDiv COMMAND test_golden_record_math special_div)
+add_test(NAME GoldenRecordMatMul COMMAND test_golden_record_math mat_mul)
+add_test(NAME GoldenRecordPRNG COMMAND test_golden_record_math prng)
+# 62-04a: 5 seeds × {1e6, 1e7} — one CTest per cell + aggregate
+set(_PRNG_MATRIX_SEEDS 0x00000001 0xDEADBEEF 0x00000000 0x12345678 0xFFFFFFFF)
+set(_PRNG_MATRIX_LENS 1000000 10000000)
+foreach(_seed IN LISTS _PRNG_MATRIX_SEEDS)
+  foreach(_len IN LISTS _PRNG_MATRIX_LENS)
+    # Strip 0x for a stable CTest name token
+    string(REGEX REPLACE "^0[xX]" "" _seed_tok "${_seed}")
+    add_test(NAME GoldenRecordPRNG_${_seed_tok}_${_len}
+             COMMAND test_golden_record_math prng ${_seed} ${_len})
+    list(APPEND _PRNG_MATRIX_TESTS GoldenRecordPRNG_${_seed_tok}_${_len})
+  endforeach()
+endforeach()
+add_test(NAME GoldenRecordPRNGMatrix COMMAND test_golden_record_math prng_matrix)
+set_tests_properties(
+  GoldenRecordFixedMul GoldenRecordSpecialDiv GoldenRecordMatMul GoldenRecordPRNG
+  GoldenRecordPRNGMatrix ${_PRNG_MATRIX_TESTS}
+  PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Phase 62-04c1b: bytecode VM traces vs ffeasm --bytecode-trace oracle
+add_executable(test_golden_record_bytecode test/test_golden_record_bytecode.cpp)
+target_link_libraries(test_golden_record_bytecode "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_executable(bytecode_replay tools/bytecode_replay.cpp)
+target_link_libraries(bytecode_replay "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME GoldenRecordBytecode COMMAND test_golden_record_bytecode)
+# Object-setup scaffolding: raw-338 PhysObj list + 0x00 object_digest parity
+add_executable(test_bytecode_object_setup test/test_bytecode_object_setup.cpp)
+target_link_libraries(test_bytecode_object_setup "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ObjectSetupScaffold COMMAND test_bytecode_object_setup)
+set_tests_properties(ObjectSetupScaffold PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(GoldenRecordBytecode PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.45: ASM storage-layout ratchet. docs/audit/layout_asserts.h (tools/asm_audit.py)
+# against the port's label storage (src/core/asm_label_table.inc); fails only if the
+# broken-pair count grows past test/data/asm_layout_baseline.txt.
+add_executable(test_asm_layout_ratchet test/test_asm_layout_ratchet.cpp)
+target_link_libraries(test_asm_layout_ratchet "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+target_include_directories(test_asm_layout_ratchet PRIVATE ${CMAKE_SOURCE_DIR}/docs/audit)
+target_compile_definitions(test_asm_layout_ratchet PRIVATE JJFFE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME AsmLayoutRatchet COMMAND test_asm_layout_ratchet)
+# The audit reproduces from our ASM + map, the label table is current, and the
+# replay hooks' data anchors match the map. Skips (77) without nasm/readelf AND,
+# since R1238, without ffeasm.map (hook anchors uncheckable).
+add_test(NAME AsmAuditReproduces
+  COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/tools/asm_audit_ctest.py)
+set_tests_properties(AsmAuditReproduces PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  SKIP_RETURN_CODE 77)
+# Task 4.46: per-function operand-set diff (tools/operand_diff.py) by ASM address.
+# Must flag the FUNC_000225 slot swap and the FUNC_001099/001033 g_bss8804 aliases
+# (fixtures); the gated classes may not grow past test/data/operand_diff_baseline.txt.
+add_test(NAME OperandDiffRatchet
+  COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/tools/operand_diff_ctest.py)
+set_tests_properties(OperandDiffRatchet PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.48: the deterministic logic replay. test_logic_replay runs the scenario with
+# time / RNG / input pinned and dumps RNG draws + per-label checkpoints;
+# tools/logic_state_diff.py compares them with the ffeasm recording
+# (test/data/logic_replay/, tools/capture_asm_replay.sh) against the ratchet baseline.
+add_executable(test_logic_replay test/test_logic_replay.cpp)
+target_link_libraries(test_logic_replay "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group" ${CMAKE_DL_LIBS})
+target_compile_definitions(test_logic_replay PRIVATE JJFFE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+# Task 4.49: the same harness in a flat 32-bit address space like the ASM's
+# (non-PIE, brk-only malloc, a MAP_32BIT stack), so the port's 32-bit copies of
+# pointers (FUNC_001538's ship models, int32_t stack-buffer parameters) stay
+# valid on the station-services path; the PIE build faults there
+# (docs/FLIGHT_SCENE_GAP.md 4.49). newgame_accel stays on the PIE build.
+add_executable(test_logic_replay_lowmem test/test_logic_replay.cpp)
+target_link_libraries(test_logic_replay_lowmem "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group" ${CMAKE_DL_LIBS})
+target_compile_definitions(test_logic_replay_lowmem PRIVATE JJFFE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+                           JJFFE_REPLAY_LOWMEM=1)
+# The image at 0x60000000 rather than 0x400000, so 16.16 values such as 0x460000
+# are not taken for code addresses when the port golden is canonicalised.
+# Task 4.145: the runtime arenas (the object pool, the DATA_008804 span and four
+# tables) sit at ffeasm's addresses for their labels (JjffeAsmArenaPlace in the test).
+target_link_options(test_logic_replay_lowmem PRIVATE -no-pie -Wl,-Ttext-segment=0x60000000)
+add_test(NAME LogicReplay
+  COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/tools/logic_state_diff.py ctest
+          --bin $<TARGET_FILE:test_logic_replay> --out ${CMAKE_BINARY_DIR}/logic_replay)
+set_tests_properties(LogicReplay PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+# Task 4.49: scripted scenarios (test/data/logic_replay/<name>/scenario.json,
+# recorded by REPLAY_SCENARIO=<name> tools/capture_asm_replay.sh).
+foreach(_scen mission_accept:LogicReplayMission combat:LogicReplayCombat dock_launch:LogicReplayDock
+              services_launch:LogicReplayServices services_tour:LogicReplayTour
+              services_every:LogicReplayEvery traffic_ai:LogicReplayTraffic
+              player_crash:LogicReplayCrash services_slots:LogicReplaySlots
+              targeting:LogicReplayTargeting hyperjump:LogicReplayHyperjump
+              military_board:LogicReplayMilitary status_screens:LogicReplayStatus
+              asteroids:LogicReplayAsteroids missiles:LogicReplayMissiles)
+  string(REPLACE ":" ";" _pair ${_scen})
+  list(GET _pair 0 _name)
+  list(GET _pair 1 _test)
+  add_test(NAME ${_test}
+    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/tools/logic_state_diff.py ctest
+            --scenario ${_name} --bin $<TARGET_FILE:test_logic_replay_lowmem>
+            --out ${CMAKE_BINARY_DIR}/logic_replay_${_name})
+  set_tests_properties(${_test} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endforeach()
+# Task 4.114: the same fifteen scenarios on the PIE binary that ships, where a
+# pointer cut to 32 bits faults or reads garbage (docs/PIE_GATE_GAP.md). Each
+# checks its own PIE self-golden (--pie: <name>/port_*_pie.txt.gz,
+# baseline_pie.txt) against the shared ASM golden. The output directories are
+# distinct: captures/4.89/ratchet.py and pin read build/logic_replay_<name>.
+set(_PIE_REPLAY_TESTS)
+foreach(_scen mission_accept:Mission combat:Combat dock_launch:Dock services_launch:Services
+              services_tour:Tour services_every:Every traffic_ai:Traffic player_crash:Crash
+              services_slots:Slots targeting:Targeting hyperjump:Hyperjump military_board:Military
+              status_screens:Status asteroids:Asteroids missiles:Missiles)
+  string(REPLACE ":" ";" _pair ${_scen})
+  list(GET _pair 0 _name)
+  list(GET _pair 1 _test)
+  add_test(NAME PieLogicReplay${_test}
+    COMMAND ${CMAKE_COMMAND} -E env python3 ${CMAKE_SOURCE_DIR}/tools/logic_state_diff.py ctest
+            --pie --scenario ${_name} --bin $<TARGET_FILE:test_logic_replay>
+            --out ${CMAKE_BINARY_DIR}/logic_replay_pie_${_name})
+  set_tests_properties(PieLogicReplay${_test} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  list(APPEND _PIE_REPLAY_TESTS PieLogicReplay${_test})
+endforeach()
+
+# Task 4.128: the ASM call oracle - logic-band functions no replay reaches,
+# called on the port and compared with the same call recorded on ffeasm
+# (test/data/asm_call_oracle/golden.txt, tools/capture_asm_call_oracle.sh).
+# Built PIE and lowmem like the replays.
+foreach(_v "test_asm_call_oracle:AsmCallOracle:0" "test_asm_call_oracle_lowmem:AsmCallOracleLowmem:1")
+  string(REPLACE ":" ";" _parts ${_v})
+  list(GET _parts 0 _exe)
+  list(GET _parts 1 _test)
+  list(GET _parts 2 _low)
+  add_executable(${_exe} test/test_asm_call_oracle.cpp)
+  target_link_libraries(${_exe} "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group" ${CMAKE_DL_LIBS})
+  target_compile_definitions(${_exe} PRIVATE JJFFE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+  if(_low)
+    target_compile_definitions(${_exe} PRIVATE JJFFE_REPLAY_LOWMEM=1)
+    target_link_options(${_exe} PRIVATE -no-pie -Wl,-Ttext-segment=0x60000000)
+  endif()
+  add_test(NAME ${_test} COMMAND ${_exe})
+  set_tests_properties(${_test} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endforeach()
+
+# 4expert pack call-graph / DATA-table closure guard (Contour dig oracle integrity)
+add_test(NAME ExpertPackClosure
+  COMMAND ${CMAKE_COMMAND} -E env python3
+          ${CMAKE_SOURCE_DIR}/tools/verify_closure.py
+          ${CMAKE_SOURCE_DIR}/4expert)
+set_tests_properties(ExpertPackClosure PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# ASM→C++ correspondence coverage (undeclared unmapped FUNCs fail)
+add_test(NAME ExpertPackReplicaCoverage
+  COMMAND ${CMAKE_COMMAND} -E env python3
+          ${CMAKE_SOURCE_DIR}/tools/verify_replica_coverage.py)
+set_tests_properties(ExpertPackReplicaCoverage PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Vertex transformation tests (Phase 3)
+add_executable(test_vertex_transform test/test_vertex_transform.cpp)
+target_link_libraries(test_vertex_transform "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME VertexTransformTests COMMAND test_vertex_transform)
+
+# Ship renderer tests (Phase 4a)
+add_executable(test_ship_renderer test/test_ship_renderer.cpp)
+target_link_libraries(test_ship_renderer "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ShipRendererTests COMMAND test_ship_renderer)
+
+# Device-free texture bake + normalized UVs (export plan step 1)
+add_executable(test_ship_texture_bake test/test_ship_texture_bake.cpp)
+target_link_libraries(test_ship_texture_bake "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ShipTextureBake COMMAND test_ship_texture_bake)
+set_tests_properties(ShipTextureBake PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Texture rasterization tests (Phase 7b)
+add_executable(test_texture_raster test/test_texture_raster.cpp)
+target_link_libraries(test_texture_raster "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+target_compile_definitions(test_texture_raster PRIVATE JJFFE_TEST)
+add_test(NAME TextureRasterTests COMMAND test_texture_raster)
+
+# Simple texture test for debugging UV mapping
+add_executable(test_texture_simple test/test_texture_simple.cpp)
+target_link_libraries(test_texture_simple "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+target_compile_definitions(test_texture_simple PRIVATE JJFFE_TEST)
+
+# Headless shuttle A/B capture (fixed poses → ab_shots/cpp/)
+add_executable(ab_capture_shuttle tools/ab_capture_shuttle.cpp)
+target_link_libraries(ab_capture_shuttle "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+# Cross-ship mesh opcode / gate / emitted-type inventory
+add_executable(mesh_opcode_inventory tools/mesh_opcode_inventory.cpp)
+target_link_libraries(mesh_opcode_inventory "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+# Headless hull + texture exporter (MODEL_EXPORT_PLAN step 2)
+add_executable(export_ship_models tools/export_ship_models.cpp)
+target_link_libraries(export_ship_models "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+# T12 golden manifest lock (playable fleet 15–71 counts)
+add_executable(test_export_golden test/test_export_golden.cpp)
+target_link_libraries(test_export_golden "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ExportGoldenManifest COMMAND test_export_golden)
+set_tests_properties(ExportGoldenManifest PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(export_face_census tools/export_face_census.cpp)
+target_link_libraries(export_face_census "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+# Phase B2 — Hull↔Overlay / Hull↔Punch coplanar census
+add_executable(export_coplanar_census tools/export_coplanar_census.cpp)
+target_link_libraries(export_coplanar_census "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+add_executable(test_coplanar_census test/test_coplanar_census.cpp)
+target_link_libraries(test_coplanar_census "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME CoplanarCensus COMMAND test_coplanar_census)
+set_tests_properties(CoplanarCensus PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# HW plan W2 — FaceRecord / Finding analysis → analysis/*.analysis.json
+add_executable(export_analysis tools/export_analysis.cpp)
+target_link_libraries(export_analysis "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+add_executable(test_face_analysis test/test_face_analysis.cpp)
+target_link_libraries(test_face_analysis "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ExportAnalysis COMMAND test_face_analysis)
+set_tests_properties(ExportAnalysis PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_face_inside test/test_face_inside.cpp)
+target_link_libraries(test_face_inside "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME FaceAnalysisInside COMMAND test_face_inside)
+set_tests_properties(FaceAnalysisInside PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(export_approve tools/export_approve.cpp)
+target_link_libraries(export_approve "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+add_executable(test_export_approval test/test_export_approval.cpp)
+target_link_libraries(test_export_approval "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ExportApproval COMMAND test_export_approval)
+set_tests_properties(ExportApproval PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Phase B1 — CPU raster participation (submitted → rasterized → depth_rejected)
+add_executable(export_raster_census tools/export_raster_census.cpp)
+target_link_libraries(export_raster_census "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+add_executable(test_raster_census test/test_raster_census.cpp)
+target_link_libraries(test_raster_census "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME RasterCensus COMMAND test_raster_census)
+set_tests_properties(RasterCensus PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(export_punch_clearance_census tools/export_punch_clearance_census.cpp)
+target_link_libraries(export_punch_clearance_census "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+
+add_executable(test_punch_clearance test/test_punch_clearance.cpp)
+target_link_libraries(test_punch_clearance "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME PunchClearance COMMAND test_punch_clearance)
+set_tests_properties(PunchClearance PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_ship_export test/test_ship_export.cpp)
+target_link_libraries(test_ship_export "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ShipExportInvariants COMMAND test_ship_export)
+set_tests_properties(ShipExportInvariants PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+add_executable(test_ship_model_asset test/test_ship_model_asset.cpp)
+target_link_libraries(test_ship_model_asset "LINKER:--start-group" jjffe_game jjffe_platform jjffe_core jjffe_data "LINKER:--end-group")
+add_test(NAME ShipModelAsset COMMAND test_ship_model_asset)
+set_tests_properties(ShipModelAsset PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Task 4.45 oracle classes, read by tools/oracle_coverage.py (`ctest -L asm_oracle`).
+# asm_oracle: some assertion compares against data recorded by running ffeasm
+#   (captures/, test/data/golden/* with "oracle": "ffeasm", GDB dumps, values
+#   copied from such a recording). Code executed under these is "gate-executed".
+# asm_transcribed: expectations read off ffe.asm / ffedat.asm, or a Python /
+#   Ghidra re-implementation of them, not a recorded run.
+# Every other test is self-referential (invariants, self-goldens, censuses).
+# AbDiffSaker and AbStrictSakerAdder compare against ffeasm dumps but soft-pass
+# any mismatch unless JJFFE_AB_STRICT=1, so they cannot fail and are not gates.
+# R1141: their reference dumps (ab_shots/asm/, ab_shots/strict/<name>/asm/) are not
+# committed, so with a missing reference they exit 77 and ctest reports them as
+# "Not Run (Skipped)" - counted as neither a pass nor a failure. Record the dumps
+# and they run as real gates again.
+set_tests_properties(
+  ModuleRegistry PlayerSpawnTests WorldParityTests WorldSpawnTable GameClock
+  Planet0x1F Op1eSentinelCompose AbDPal
+  GoldenRecordShipDemo ${_GOLDEN_SHIP_TESTS} FlightFrameAB ViewModeAB MissileViewReach HudRangeReach ParentRotationAB IntroCastColour
+  TerrainColourOracle TerrainHazeDepth WaterHazeOracle WaterFaceCensus PadCityColour
+  BootFlow UnitsAudit ConsoleGauge ConsoleButtons
+  GoldenRecordBytecode ObjectSetupScaffold LogicReplay
+  LogicReplayMission LogicReplayCombat LogicReplayDock LogicReplayServices LogicReplayTour
+  LogicReplayEvery LogicReplayTraffic LogicReplayCrash LogicReplaySlots LogicReplayTargeting
+  LogicReplayHyperjump LogicReplayMilitary LogicReplayStatus LogicReplayAsteroids
+  LogicReplayMissiles ${_PIE_REPLAY_TESTS} AsmCallOracle AsmCallOracleLowmem
+  PROPERTIES LABELS asm_oracle)
+set_tests_properties(
+  GoldenRecordFixedMul GoldenRecordSpecialDiv GoldenRecordMatMul GoldenRecordPRNG
+  GoldenRecordPRNGMatrix ${_PRNG_MATRIX_TESTS}
+  AbProjectionZoom VideoTests GuiPointers ConsoleLogFlag SysGenTests AbRasterFlat
+  PROPERTIES LABELS asm_transcribed)

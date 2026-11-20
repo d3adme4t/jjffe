@@ -1,0 +1,110 @@
+# Build artifacts
+build/
+build-asan/
+build-dbg/
+build-cov/
+build-rel/
+build-rel-*/
+build-msan/
+*.o
+*.exe
+ffelnxsdl
+linux/lnxconv
+map.log
+
+# Temporary files
+Testing/
+*.tmp
+*.log
+
+# Generated during build
+linux/ffelnx.asm
+symbol_index.json
+
+# Ad-hoc mesh/rotation debug dumps (not part of the build)
+dump_mesh.py
+test_dump_shuttle.cpp
+test_dump_vertices.cpp
+shuttle.obj
+shuttle_mesh_dump.txt
+live_rotation_log.txt
+
+# A/B capture output (regenerate with ./build/ab_capture_shuttle)
+ab_shots/
+
+# Headless model export (regenerate with ./build/export_ship_models)
+export/
+# HW plan W2 analysis output (regenerate with ./build/export_analysis)
+analysis/
+# HW plan W4 approval sidecars (regenerate with ./build/export_approve)
+approved/
+scrnshot*.bmp
+
+# 32-bit NASM reference binary (make -f ffeasm.mak)
+ffeasm
+ffeasm.map
+linux/*.o
+linux/ffelnx.asm
+linux/lnxconv
+map.log
+
+# Intro capture output (tools/capture_intro.sh)
+# Scenario JSONs are tracked (small, needed to regenerate reference frames) —
+# everything else under captures/ (bin/log/raw/png/pal/...) stays ignored.
+captures/**
+!captures/**/
+!captures/**/*scenario*.json
+
+# The doer-checker loop's verdict channel (untracked by design since the R1203
+# fix): it is the loop's own bookkeeping between rounds and must never be staged
+# into a round commit or appear in the judged diff. REVIEW.md stays tracked — it
+# is the project record the loop no longer touches.
+.dc_review.md
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Accidental artifacts (crash dumps, local FFE data symlink)
+core.*
+fx
+
+# Valgrind core dumps. A 4.131 debugging session left two 13 MB files in the tree and
+# the loop s git add -A swept them into a round commit; they never reached the remote.
+vgcore.*
+build-*/
+
+# Scratch capture output from experiment rounds (8-pose BMPs, stages.json,
+# nested baseline records). Regenerable via tools/ab_named_baseline.py; the
+# lasting evidence (findings_*.md, probe*.gdb, *.tsv, *.txt) stays tracked.
+# Keeps `git add -A` from sweeping hundreds of MB of pixels into a round commit.
+scratch/r1/*/
+scratch/r48*/
+scratch/r1199*/
+scratch/r1200*/
+scratch/r1201*/
+scratch/r1202*/
+scratch/r1203*/
+scratch/r1204*/
+scratch/class2/o*/
+scratch/class2/p*/
+scratch/class2/oracle*/
+scratch/class2/bbox_*/
+commandr/
+commandr.dialogpxbak.*
+
+# R1247 surgery: untrack generated build artifacts + replay checkpoints
+CMakeCache.txt
+CMakeFiles/
+CTestTestfile.cmake
+Makefile
+cmake_install.cmake
+scratch/*/ckpt_*.bin
+scratch/*/*.ckpt
+
+# Prior batch evidence dirs (untracked; regenerable via capture scripts)
+scratch/r1231_check/
+scratch/r1232/lmenu*_asm/
+scratch/r1242/asm_fireab/
+scratch/r1243/asm_fireab/
+build/
