@@ -73,6 +73,7 @@ def parse_nasm_file(filepath):
             values = parse_dd_values(values_str)
             current_bytes.extend(values)
 
+            continue
         # Handle dw (define word - 2 bytes each)
         dwm = dw_pattern.match(line)
         if dwm:
@@ -88,7 +89,6 @@ def parse_nasm_file(filepath):
             value_str = tm.group(2)
             values = parse_times_values(value_str, count)
             current_bytes.extend(values)
-            continue
 
             continue
         

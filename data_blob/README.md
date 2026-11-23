@@ -13,7 +13,7 @@ The `data_blob.bin` file and associated headers are derived from the original ga
 ### Prerequisites
 - Original FFE game installation (JJ-patched build recommended)
 - Python 3
-- NASM assembly files (`ffe.asm`, `ffedat.asm`)
+- NASM assembly files (`ffe.asm`, `ffebmp.asm`, `ffedat.asm`)
 
 ### Steps
 

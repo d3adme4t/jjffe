@@ -49,7 +49,7 @@ This generates:
 - `data_blob/data_blob.h` (C++ header with offsets)
 - `data_blob/data_offset_map.txt` (human-readable map)
 
-**Important:** You must own a legitimate copy of Frontier: First Encounters. The assembly files (`ffe.asm`, `ffedat.asm`) are from the JJ-patched version of the game.
+**Important:** You must own a legitimate copy of Frontier: First Encounters. The assembly files (`ffe.asm`, `ffebmp.asm`, `ffedat.asm`) are from the JJ-patched version of the game.
 
 ### Run the game
 ```bash
