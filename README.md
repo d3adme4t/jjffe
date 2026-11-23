@@ -19,7 +19,7 @@ cp tools/extract_data.py /path/to/FFE/
 
 # Extract game data (REQUIRED before first run)
 cd /path/to/FFE/
-python3 extract_data.py /path/to/ffe.asm /path/to/ffedat.asm
+python3 extract_data.py /path/to/nasm-files/
 
 # Run the game
 ./ffelnxsdl

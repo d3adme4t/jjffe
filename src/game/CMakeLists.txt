@@ -60,4 +60,3 @@ find_package(ZLIB REQUIRED)
 target_link_libraries(jjffe_game PUBLIC ZLIB::ZLIB)
 
 # Enable test-only simulation functions in ship_controls
-target_compile_definitions(jjffe_game PUBLIC JJFFE_TEST)

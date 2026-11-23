@@ -5876,7 +5876,7 @@ static void DrawFlatPolygon(const TransformedPoly& poly, const ShipModel* shipMo
             MaterialInfo m42 = ResolveMaterial(poly.texInfo);
             fprintf(stderr, "MESH42 type=%d vc=%d tex=0x%04x isTex=%d back=%d texWord=0x%x shades[0..3]=(%u,%u,%u,%u)\n",
                     (int)poly.type, poly.vertexCount, poly.texInfo, (int)isTextured,
-                    (int)poly.backFacing, m42.texWord, m42.shades[0], m42.shades[1], m42.shades[2], m42.shades[3]);
+                    (int)poly.backFacing, m42.texWord, (unsigned)m42.shades[0], (unsigned)m42.shades[1], (unsigned)m42.shades[2], (unsigned)m42.shades[3]);
             ++n42;
         }
     }

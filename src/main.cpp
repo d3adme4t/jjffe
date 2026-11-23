@@ -112,7 +112,6 @@ int main(int argc, char* argv[])
     printf("JJFFE v2.8 - D3D9/DXVK (FFED3D models)\n");
 #else
     printf("JJFFE v2.8 - C++ Port\n");
-    printf("ASM to C++ conversion in progress...\n");
 #endif
 
     bool startAtShipSelect = false;

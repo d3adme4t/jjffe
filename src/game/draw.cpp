@@ -990,7 +990,7 @@ static void TexSpanAsm(int scanlines)
                     (unsigned)s_u[0], (unsigned)s_v[0], (unsigned)s_u[1], (unsigned)s_v[1],
                     (unsigned)s_dx[0], (unsigned)s_dx[1], (const void*)s_texPixels);
             fprintf(stderr, "SPANTEXB n=%d b24=%02x %02x %02x %02x %02x %02x %02x %02x b31=%02x pal=%u,%u,%u,%u,%u,%u,%u\n",
-                    s_tn, (const void*)s_texPixels,
+                    s_tn,
                     s_texPixels ? s_texPixels[24] : 0, s_texPixels ? s_texPixels[25] : 0,
                     s_texPixels ? s_texPixels[26] : 0, s_texPixels ? s_texPixels[27] : 0,
                     s_texPixels ? s_texPixels[28] : 0, s_texPixels ? s_texPixels[29] : 0,

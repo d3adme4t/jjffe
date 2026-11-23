@@ -6,7 +6,7 @@ This document covers configure/build options for the Linux SDL port (`ffelnxsdl`
 
 | Package | Notes |
 |---|---|
-| CMake **3.16+** | Generators: Ninja recommended (`ninja`), Make also works |
+| CMake **3.24+** | Generators: Ninja recommended (`ninja`), Make also works |
 | GCC or Clang with **C++17** / **C11** | |
 | **SDL 1.2** (`libsdl1.2-dev`) | Required when `JJFFE_USE_SDL=ON` (default) |
 | **pkg-config** | Locates SDL / optional SDL_mixer |
@@ -42,10 +42,10 @@ You must extract the game data from your original FFE installation **before** ru
 ```bash
 cd /path/to/FFE/
 
-# Extract data from original NASM assembly files
-
 **Note:** The script expects a directory containing `.asm` files (not individual file arguments). It will process all DATA_ labels found in the directory.
 python3 extract_data.py /path/to/ffe.asm /path/to/ffedat.asm
+
+**Note:** The script expects a directory containing `.asm` files (not individual file arguments). It processes all DATA_ labels found in the directory and generates data_blob.bin, data_blob.h, and data_offset_map.txt in the output directory (default: data_blob/).
 
 # This generates:
 # - data_blob/data_blob.bin (game asset data)

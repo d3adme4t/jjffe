@@ -18,8 +18,10 @@ The `data_blob.bin` file and associated headers are derived from the original ga
 ### Steps
 
 1. **Extract data from NASM assembly:**
+
+**Note:** Provide a directory path containing .asm files, not individual file paths.
    ```bash
-   python3 tools/extract_data.py <path-to-ffe.asm> <path-to-ffedat.asm>
+   python3 tools/extract_data.py <nasm-directory> [output-dir]
    ```
 
 2. **This will generate:**
