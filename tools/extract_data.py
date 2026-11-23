@@ -362,10 +362,6 @@ def main():
     validate_blob_size(blob_path, expected_size)
 
 
-if __name__ == '__main__':
-    main()
-
-
 def validate_blob_size(blob_path, expected_size):
     """Validate that the generated blob matches the expected size from data_blob.h"""
     import os
@@ -387,3 +383,7 @@ def validate_blob_size(blob_path, expected_size):
     else:
         print(f"\n✓ Blob size verified: {actual_size} bytes matches expected size")
         return True
+
+
+if __name__ == '__main__':
+    main()
