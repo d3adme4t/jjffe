@@ -21,6 +21,9 @@ def parse_nasm_file(filepath):
     
     db_pattern = re.compile(r'^\s*db\s+(.+)$', re.IGNORECASE)
     dd_pattern = re.compile(r'^\s*dd\s+(.+)$', re.IGNORECASE)
+    dw_pattern = re.compile(r'^\s*dw\s+(.+)$', re.IGNORECASE)
+    times_pattern = re.compile(r'^\s*times\s+(\d+)\s+db\s+(.+)$', re.IGNORECASE)
+
     label_pattern = re.compile(r'^(DATA_\d+)\s*:', re.IGNORECASE)
     global_pattern = re.compile(r'^GLOBAL\s+(DATA_\d+)', re.IGNORECASE)
     
@@ -69,6 +72,24 @@ def parse_nasm_file(filepath):
             values_str = ddm.group(1)
             values = parse_dd_values(values_str)
             current_bytes.extend(values)
+
+        # Handle dw (define word - 2 bytes each)
+        dwm = dw_pattern.match(line)
+        if dwm:
+            values_str = dwm.group(1)
+            values = parse_dw_values(values_str)
+            current_bytes.extend(values)
+            continue
+
+        # Handle times N db value (repeat byte N times)
+        tm = times_pattern.match(line)
+        if tm:
+            count = int(tm.group(1))
+            value_str = tm.group(2)
+            values = parse_times_values(value_str, count)
+            current_bytes.extend(values)
+            continue
+
             continue
         
         # If we hit code-like content while in a data block, end it
@@ -110,6 +131,28 @@ def split_operands(values_str):
         i += 1
     parts.append(cur)
     return parts
+
+
+def split_by_comma(s):
+    """Split string by commas, respecting quoted strings"""
+    result = []
+    current = []
+    in_quotes = False
+    
+    for ch in s:
+        if ch == '"':
+            in_quotes = not in_quotes
+            current.append(ch)
+        elif ch == ',' and not in_quotes:
+            result.append(''.join(current))
+            current = []
+        else:
+            current.append(ch)
+    
+    if current:
+        result.append(''.join(current))
+    
+    return result
 
 
 def parse_values(values_str):
@@ -178,6 +221,53 @@ def parse_dd_values(values_str):
                 result.extend([0, 0, 0, 0])
     
     return result
+
+
+def parse_dw_values(values_str):
+    """Parse dw (define word) values - each value is 2 bytes, little-endian"""
+    result = []
+    # Split by comma, handling quoted strings
+    parts = split_by_comma(values_str)
+    
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        
+        # Handle quoted strings in dw
+        if part.startswith('"') and part.endswith('"'):
+            # String in dw - each char gets 2 bytes (char + 0x00)
+            string_val = part[1:-1]
+            for ch in string_val:
+                result.append(ord(ch) & 0xFF)
+                result.append(0x00)
+        else:
+            # Numeric value - convert to 2-byte little-endian
+            try:
+                val = int(part, 0)  # Auto-detect hex (0x), binary (0b), etc.
+                result.append(val & 0xFF)
+                result.append((val >> 8) & 0xFF)
+            except ValueError:
+                pass  # Skip unparseable values
+    
+    return result
+
+
+def parse_times_values(value_str, count):
+    """Parse 'times N db value' - repeat byte value N times"""
+    result = []
+    value_str = value_str.strip()
+    
+    # Parse the value (can be hex like 0xFF or decimal)
+    try:
+        val = int(value_str, 0)
+        byte_val = val & 0xFF
+        result.extend([byte_val] * count)
+    except ValueError:
+        pass  # Skip if can't parse
+    
+    return result
+
 
 
 def extract_data(nasm_dir, output_dir):
@@ -254,6 +344,8 @@ def extract_data(nasm_dir, output_dir):
 
 
 def main():
+    import os
+    
     if len(sys.argv) < 2:
         nasm_dir = '.'
         output_dir = 'data_blob'
@@ -261,8 +353,37 @@ def main():
         nasm_dir = sys.argv[1]
         output_dir = sys.argv[2] if len(sys.argv) > 2 else 'data_blob'
     
-    extract_data(nasm_dir, output_dir)
+    num_blocks, total_size = extract_data(nasm_dir, output_dir)
+    
+    # Validate blob size against expected value from data_blob.h
+    blob_path = os.path.join(output_dir, 'data_blob.bin')
+    expected_size = 1583634  # BLOB_TOTAL_SIZE from data_blob.h
+    
+    validate_blob_size(blob_path, expected_size)
 
 
 if __name__ == '__main__':
     main()
+
+
+def validate_blob_size(blob_path, expected_size):
+    """Validate that the generated blob matches the expected size from data_blob.h"""
+    import os
+    
+    if not os.path.exists(blob_path):
+        print(f"ERROR: Blob file not found: {blob_path}")
+        return False
+    
+    actual_size = os.path.getsize(blob_path)
+    
+    if actual_size != expected_size:
+        print(f"\nWARNING: Blob size mismatch!")
+        print(f"  Expected: {expected_size} bytes (from data_blob.h)")
+        print(f"  Actual:   {actual_size} bytes")
+        print(f"  Difference: {actual_size - expected_size} bytes")
+        print("\nThe generated blob may not work correctly with the game.")
+        print("Check that all dw/dq/times directives were parsed correctly.")
+        return False
+    else:
+        print(f"\n✓ Blob size verified: {actual_size} bytes matches expected size")
+        return True
