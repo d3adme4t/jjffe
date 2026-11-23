@@ -1,3 +1,4 @@
+#include <cstdint>
 #ifndef JJFFE_DATA_BLOB_H
 #define JJFFE_DATA_BLOB_H
 

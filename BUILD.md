@@ -43,6 +43,8 @@ You must extract the game data from your original FFE installation **before** ru
 cd /path/to/FFE/
 
 # Extract data from original NASM assembly files
+
+**Note:** The script expects a directory containing `.asm` files (not individual file arguments). It will process all DATA_ labels found in the directory.
 python3 extract_data.py /path/to/ffe.asm /path/to/ffedat.asm
 
 # This generates:

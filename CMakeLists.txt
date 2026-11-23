@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
 project(jjffe VERSION 2.8 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
