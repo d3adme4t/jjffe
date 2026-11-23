@@ -37,6 +37,21 @@ cp tools/extract_data.py /path/to/FFE/
 
 ### Generate game data (required before first run)
 
+### Where to get the NASM assembly files
+
+The `.asm` files are part of the JJ-patched Frontier: First Encounters distribution. You need:
+
+1. **A legitimate copy of Frontier: First Encounters** (the original 1996 DOS game)
+2. **The JJ patch** applied to your game installation
+3. **The disassembled source** from the JJ-patched version
+
+These files are typically found in the JJFFE development repository or provided with patched distributions. The three required files are:
+- `ffe.asm` - Main game code
+- `ffebmp.asm` - Bitmap data
+- `ffedat.asm` - Game data tables
+
+**Important:** These assembly files contain data extracted from the original game. You must own a legitimate copy of Frontier: First Encounters to use them legally.
+
 You must extract the game data from your original FFE installation **before** running the executable. The script takes a directory of `.asm` files, not individual files, and writes `data_blob.bin`, `data_blob.h` and `data_offset_map.txt` to the output directory (default `data_blob/`).
 
 ```bash

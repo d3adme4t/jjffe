@@ -359,7 +359,14 @@ def main():
     blob_path = os.path.join(output_dir, 'data_blob.bin')
     expected_size = 1583634  # BLOB_TOTAL_SIZE from data_blob.h
     
-    validate_blob_size(blob_path, expected_size)
+    if not validate_blob_size(blob_path, expected_size):
+        print("
+ERROR: Blob size validation failed. Extraction incomplete.")
+        sys.exit(1)
+    
+    print("
+Extraction completed successfully.")
+    sys.exit(0)
 
 
 def validate_blob_size(blob_path, expected_size):
