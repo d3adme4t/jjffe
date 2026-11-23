@@ -41,12 +41,13 @@ You must extract the game data from your original FFE installation **before** ru
 
 ```bash
 cd /path/to/FFE/
-
-**Note:** The script expects a directory containing `.asm` files (not individual file arguments). It will process all DATA_ labels found in the directory.
-python3 extract_data.py /path/to/ffe.asm /path/to/ffedat.asm
-
 **Note:** The script expects a directory containing `.asm` files (not individual file arguments). It processes all DATA_ labels found in the directory and generates data_blob.bin, data_blob.h, and data_offset_map.txt in the output directory (default: data_blob/).
 
+```bash
+python3 extract_data.py /path/to/nasm-directory [output-dir]
+```
+
+# This generates:
 # This generates:
 # - data_blob/data_blob.bin (game asset data)
 # - data_blob/data_blob.h (C++ header with offsets)
@@ -85,7 +86,7 @@ The executable expects to find `data_blob/data_blob.bin` in the current working 
 The `data_blob/data_blob.h` file (offset constants) is included for compilation, but you must generate `data_blob/data_blob.bin` from your original game:
 
 ```bash
-python3 tools/extract_data.py <path-to-ffe.asm> <path-to-ffedat.asm>
+python3 tools/extract_data.py <nasm-directory> [output-dir]
 ```
 
 See [data_blob/README.md](data_blob/README.md) for complete instructions.
