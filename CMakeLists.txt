@@ -31,11 +31,7 @@ add_subdirectory(src/data)
 
 add_executable(ffelnxsdl src/main.cpp)
 target_link_libraries(ffelnxsdl
-    $<LINK_GROUP:RESCAN>
-    jjffe_game
-    jjffe_platform
-    jjffe_core
-    jjffe_data
+    $<LINK_GROUP:RESCAN,jjffe_game,jjffe_platform,jjffe_core,jjffe_data>
     
 )
 
@@ -72,13 +68,7 @@ if(JJFFE_USE_D3D9)
     add_subdirectory(src/d3d)
     add_executable(ffelnxd3d src/main.cpp)
     target_link_libraries(ffelnxd3d
-        $<LINK_GROUP:RESCAN>
-        jjffe_d3d
-        jjffe_game
-        jjffe_platform
-        jjffe_core
-        jjffe_data
-        
+        $<LINK_GROUP:RESCAN,jjffe_d3d,jjffe_game,jjffe_platform,jjffe_core,jjffe_data>
     )
     target_compile_definitions(ffelnxd3d PRIVATE JJFFE_USE_D3D9 __FFELNXD3D__)
     set_target_properties(ffelnxd3d PROPERTIES
@@ -92,13 +82,7 @@ if(JJFFE_USE_OGRE)
     add_subdirectory(src/ogre)
     add_executable(ffelnxogre src/main.cpp)
     target_link_libraries(ffelnxogre
-        $<LINK_GROUP:RESCAN>
-        jjffe_ogre
-        jjffe_game
-        jjffe_platform
-        jjffe_core
-        jjffe_data
-        
+        $<LINK_GROUP:RESCAN,jjffe_ogre,jjffe_game,jjffe_platform,jjffe_core,jjffe_data>
     )
     target_compile_definitions(ffelnxogre PRIVATE JJFFE_USE_OGRE __FFELNXOGRE__)
     # RPATH matches JJFFE_OGRE_NEXT_ROOT (default /opt/ogre-next)

@@ -32,7 +32,7 @@ target_compile_options(jjffe_core PRIVATE -fpermissive)
 
 # GCC ICEs on this 50k-line TU at -O3 (internal compiler error, final_scan_insn);
 # compile it unoptimized until the toolchain is fixed.
-set_source_files_properties(core.cpp PROPERTIES COMPILE_OPTIONS "-O0;-funsigned-char")
+set_source_files_properties(core.cpp PROPERTIES COMPILE_OPTIONS "-O0;-Wno-narrowing")
 
 target_include_directories(jjffe_core PUBLIC
     ${CMAKE_SOURCE_DIR}/include
