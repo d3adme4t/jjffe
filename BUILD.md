@@ -37,27 +37,21 @@ cp tools/extract_data.py /path/to/FFE/
 
 ### Generate game data (required before first run)
 
-You must extract the game data from your original FFE installation **before** running the executable:
+You must extract the game data from your original FFE installation **before** running the executable. The script takes a directory of `.asm` files, not individual files, and writes `data_blob.bin`, `data_blob.h` and `data_offset_map.txt` to the output directory (default `data_blob/`).
 
 ```bash
 cd /path/to/FFE/
-**Note:** The script expects a directory containing `.asm` files (not individual file arguments). It processes all DATA_ labels found in the directory and generates data_blob.bin, data_blob.h, and data_offset_map.txt in the output directory (default: data_blob/).
-
-```bash
 python3 extract_data.py /path/to/nasm-directory [output-dir]
 ```
 
-# This generates:
-# This generates:
-# - data_blob/data_blob.bin (game asset data)
-# - data_blob/data_blob.h (C++ header with offsets)
-# - data_blob/data_offset_map.txt (human-readable map)
-```
+This generates:
+- `data_blob/data_blob.bin` (game asset data)
+- `data_blob/data_blob.h` (C++ header with offsets)
+- `data_blob/data_offset_map.txt` (human-readable map)
 
 **Important:** You must own a legitimate copy of Frontier: First Encounters. The assembly files (`ffe.asm`, `ffedat.asm`) are from the JJ-patched version of the game.
 
 ### Run the game
-
 ```bash
 cd /path/to/FFE/
 ./ffelnxsdl
