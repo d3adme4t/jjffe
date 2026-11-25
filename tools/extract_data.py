@@ -360,12 +360,10 @@ def main():
     expected_size = 1583634  # BLOB_TOTAL_SIZE from data_blob.h
     
     if not validate_blob_size(blob_path, expected_size):
-        print("
-ERROR: Blob size validation failed. Extraction incomplete.")
+        print("\nERROR: Blob size validation failed. Extraction incomplete.")
         sys.exit(1)
     
-    print("
-Extraction completed successfully.")
+    print("\nExtraction completed successfully.")
     sys.exit(0)
 
 
