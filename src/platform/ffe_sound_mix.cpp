@@ -2,6 +2,7 @@
 //   descs :19–60, FillSound :112–161, StopAll :169–176, PlaySample :178–237,
 //   LoadSample :239–266.
 #include "jjffe/ffe_sound_mix.h"
+#include "case_path.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -114,39 +115,32 @@ void TestInstallSample(int index, void* data, int lenSamples)
 
 void TestSetSoundInit(bool on) { g_soundInit = on; }
 
-static bool FileReadable(const char* path)
-{
-    return path && path[0] && access(path, R_OK) == 0;
-}
-
 // Resolve <name>.raw: fx/ override if present, else data_blob/sound_raw/,
-// else FFE_DIR/fx/. Never shell out / download.
+// else FFE_DIR/fx/. Case-insensitive (DOS semantics) via ResolveCasePath, so
+// original uppercase installs (FX/AIROPEN.RAW) resolve on Linux too.
+// Never shell out / download.
 static bool ResolveSamplePath(const char* name, char* out, size_t outSz)
 {
     char cand[512];
 
     snprintf(cand, sizeof(cand), "fx/%s.raw", name);
-    if (FileReadable(cand)) {
-        snprintf(out, outSz, "%s", cand);
+    if (ResolveCasePath(cand, out, outSz)) {
         return true;
     }
 
     snprintf(cand, sizeof(cand), "data_blob/sound_raw/%s.raw", name);
-    if (FileReadable(cand)) {
-        snprintf(out, outSz, "%s", cand);
+    if (ResolveCasePath(cand, out, outSz)) {
         return true;
     }
 
     snprintf(cand, sizeof(cand), "../data_blob/sound_raw/%s.raw", name);
-    if (FileReadable(cand)) {
-        snprintf(out, outSz, "%s", cand);
+    if (ResolveCasePath(cand, out, outSz)) {
         return true;
     }
 
     if (const char* ffe = getenv("FFE_DIR")) {
         snprintf(cand, sizeof(cand), "%s/fx/%s.raw", ffe, name);
-        if (FileReadable(cand)) {
-            snprintf(out, outSz, "%s", cand);
+        if (ResolveCasePath(cand, out, outSz)) {
             return true;
         }
     }

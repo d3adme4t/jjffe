@@ -14,6 +14,8 @@
 #include <cmath>
 #include <unistd.h>
 
+#include "case_path.h"
+
 #ifdef JJFFE_USE_SDL_MIXER
 // In-tree HMP→MIDI converter (hmp.cpp). SDL_mixer 1.2.13 aborts with
 // `free(): double free` if Mix_LoadMUS is handed a .hmp — never do that.
@@ -251,8 +253,9 @@ void PlatformMusicCleanup()
 }
 
 // Win32 ConvertHMP counterpart (w32sound.cpp): HMP → on-disk MIDI via load_hmp.
-// Writes music/<name>.mid next to the .hmp so subsequent plays hit Mix_LoadMUS
-// directly. Returns true if midiPath exists and is readable after the call.
+// Writes the .mid at the caller-supplied path (next to the source .hmp) so
+// subsequent plays hit Mix_LoadMUS directly.
+// Returns true if midiPath exists and is readable after the call.
 static bool ConvertHmpToMidi(const char* hmpPath, const char* midiPath)
 {
     FILE* hmp = fopen(hmpPath, "rb");
@@ -357,6 +360,18 @@ static Mix_Music* LoadHmpViaMemory(const char* hmpPath)
     return mus;
 }
 
+// MIDI cache path next to the source .hmp: same directory, same stem,
+// ".mid" extension (MUSIC/QQESCAPE.HMP -> MUSIC/QQESCAPE.MID).
+static void DeriveMidiBeside(const char* hmpPath, char* out, size_t outSz)
+{
+    snprintf(out, outSz, "%s", hmpPath);
+    char* dot = strrchr(out, '.');
+    const char* slash = strrchr(out, '/');
+    if (dot && (!slash || dot > slash)) *dot = '\0';
+    const size_t n = strlen(out);
+    snprintf(out + n, outSz - n, ".mid");
+}
+
 void PlatformMusicPlaySong(int songId)
 {
     if (!g_musicInitialized) return;
@@ -378,36 +393,42 @@ void PlatformMusicPlaySong(int songId)
     
     // Game ships music/<name>.hmp; a few titles also have .mid. SDL_mixer must
     // only ever see MIDI — Mix_LoadMUS(.hmp) aborts on 1.2.13 (R1239 blocker).
-    // R1244: resolve like the SFX loader (ResolveSamplePath, ffe_sound_mix.cpp:122).
-    // The ASM runs from FFE_DIR where `music/` is a sibling of the exe; the port
-    // runs from the repo root, where it is NOT — so a cwd-only "music/…" lookup
-    // found nothing and the game played silent (music path never got the fx/
-    // treatment SFX did). Resolve cwd first, then $FFE_DIR/music/ — strictly
-    // additive: the ASM path and the MusicHmpSmoke fixture (which create a local
-    // music/) still hit the cwd candidate first and behave byte-identically.
+    // R1244: resolve like the SFX loader (ResolveSamplePath, ffe_sound_mix.cpp).
+    // R1246: ResolveCasePath restores DOS case-insensitive lookup — original
+    // installs ship MUSIC/QQESCAPE.HMP, which a cwd-only lowercase "music/…"
+    // probe cannot see on a case-sensitive FS. Exact paths win and the cwd
+    // candidate is tried before $FFE_DIR/music/, so lowercase dev layouts and
+    // the MusicHmpSmoke fixture behave byte-identically.
     char midiPath[512];
     char hmpPath[512];
-    snprintf(midiPath, sizeof(midiPath), "music/%s.mid", songName);
-    snprintf(hmpPath, sizeof(hmpPath), "music/%s.hmp", songName);
-    if (access(midiPath, R_OK) != 0 && access(hmpPath, R_OK) != 0) {
+    char cand[512];
+    snprintf(cand, sizeof(cand), "music/%s.mid", songName);
+    bool haveMid = ResolveCasePath(cand, midiPath, sizeof(midiPath));
+    snprintf(cand, sizeof(cand), "music/%s.hmp", songName);
+    bool haveHmp = ResolveCasePath(cand, hmpPath, sizeof(hmpPath));
+    if (!haveMid && !haveHmp) {
         const char* ffe = getenv("FFE_DIR");
         if (ffe && ffe[0]) {
-            char candMid[512], candHmp[512];
-            snprintf(candMid, sizeof(candMid), "%s/music/%s.mid", ffe, songName);
-            snprintf(candHmp, sizeof(candHmp), "%s/music/%s.hmp", ffe, songName);
-            if (access(candMid, R_OK) == 0 || access(candHmp, R_OK) == 0) {
-                snprintf(midiPath, sizeof(midiPath), "%s", candMid);
-                snprintf(hmpPath, sizeof(hmpPath), "%s", candHmp);
-            }
+            snprintf(cand, sizeof(cand), "%s/music/%s.mid", ffe, songName);
+            haveMid = ResolveCasePath(cand, midiPath, sizeof(midiPath));
+            snprintf(cand, sizeof(cand), "%s/music/%s.hmp", ffe, songName);
+            haveHmp = ResolveCasePath(cand, hmpPath, sizeof(hmpPath));
         }
     }
 
-    if (access(midiPath, R_OK) != 0 && access(hmpPath, R_OK) == 0) {
-        if (!ConvertHmpToMidi(hmpPath, midiPath)) {
-            // music/ not writable — convert in memory for this play only.
+    if (!haveMid && haveHmp) {
+        // Convert once, next to the .hmp (same dir, same stem); the next play
+        // resolves the .mid directly.
+        char midiOut[512];
+        DeriveMidiBeside(hmpPath, midiOut, sizeof(midiOut));
+        if (ConvertHmpToMidi(hmpPath, midiOut)) {
+            snprintf(midiPath, sizeof(midiPath), "%s", midiOut);
+            haveMid = true;
+        } else {
+            // dir not writable — convert in memory for this play only.
             g_currentMusic = LoadHmpViaMemory(hmpPath);
             if (g_currentMusic) {
-                snprintf(midiPath, sizeof(midiPath), "music/%s.hmp->mid(mem)", songName);
+                snprintf(midiPath, sizeof(midiPath), "%s->mid(mem)", hmpPath);
             }
         }
     }
@@ -416,15 +437,17 @@ void PlatformMusicPlaySong(int songId)
         g_currentMusic = Mix_LoadMUS(midiPath);
     }
     // R1240 M7: corrupt/truncated .mid cache — unlink, re-convert from .hmp, retry once.
-    if (!g_currentMusic && access(hmpPath, R_OK) == 0) {
+    if (!g_currentMusic && haveHmp) {
         fprintf(stderr,
                 "Music: Mix_LoadMUS(%s) failed (%s); unlinking suspect .mid and re-converting from %s\n",
                 midiPath, Mix_GetError(), hmpPath);
         unlink(midiPath);
-        if (ConvertHmpToMidi(hmpPath, midiPath)) {
-            g_currentMusic = Mix_LoadMUS(midiPath);
+        char midiOut[512];
+        DeriveMidiBeside(hmpPath, midiOut, sizeof(midiOut));
+        if (ConvertHmpToMidi(hmpPath, midiOut)) {
+            g_currentMusic = Mix_LoadMUS(midiOut);
             if (g_currentMusic) {
-                fprintf(stderr, "Music: re-convert retry succeeded for %s\n", midiPath);
+                fprintf(stderr, "Music: re-convert retry succeeded for %s\n", midiOut);
             }
         }
     }

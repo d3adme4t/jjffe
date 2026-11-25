@@ -6,6 +6,7 @@ add_library(jjffe_platform
     sound.cpp
     input.cpp
     timer.cpp
+    case_path.cpp
 )
 
 target_include_directories(jjffe_platform PUBLIC
